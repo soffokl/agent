@@ -114,7 +114,7 @@ func cleanupPortMap(ip string) {
 	list := make(map[string][]string)
 	bolt, err := db.New()
 	log.Check(log.WarnLevel, "Opening database", err)
-	for _, proto := range []string{"tcp", "udp", "http"} {
+	for _, proto := range []string{"tcp", "udp", "http", "https"} {
 		list[proto] = bolt.ExtPorts(proto, ip)
 		// mapRemove(proto, ip, port)
 

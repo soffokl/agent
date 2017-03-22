@@ -173,15 +173,15 @@ func newConfig(protocol, port, domain, cert string) {
 			"ssl_certificate_key "+config.Agent.DataPrefix+"web/ssl/https-"+port+".key;", true)
 	case "http":
 		fs.Copy(config.Agent.AppPrefix+"etc/nginx/tmpl/vhost.example",
-			config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf")
-		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
+			config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+"-"+domain+".conf")
+		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+"-"+domain+".conf",
 			"listen 	80;", "	listen "+port+";", true)
-		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
+		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+"-"+domain+".conf",
 			"server_name DOMAIN;", "server_name "+domain+";", true)
-		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
-			"proxy_pass http://DOMAIN-upstream/;", "	proxy_pass http://http-"+port+";", true)
-		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
-			"upstream DOMAIN-upstream {", "upstream http-"+port+" {", true)
+		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+"-"+domain+".conf",
+			"proxy_pass http://DOMAIN-upstream/;", "	proxy_pass http://"+protocol+"-"+port+"-"+domain+";", true)
+		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+"-"+domain+".conf",
+			"upstream DOMAIN-upstream {", "upstream "+protocol+"-"+port+"-"+domain+" {", true)
 	case "tcp":
 		fs.Copy(config.Agent.AppPrefix+"etc/nginx/tmpl/stream.example",
 			config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf")
