@@ -23,6 +23,7 @@ func init() {
 		log.Error("Please run as root")
 	}
 	os.Setenv("PATH", "/apps/subutai/current/bin:"+os.Getenv("PATH"))
+	log.ActivateSyslog("127.0.0.1:1514", "cli")
 	if len(os.Args) > 1 {
 		if os.Args[1] == "-d" {
 			log.Level(log.DebugLevel)
@@ -56,12 +57,9 @@ func main() {
 
 	app.Commands = []gcli.Command{{
 		Name: "attach", Usage: "attach to Subutai container",
-		Flags: []gcli.Flag{
-			gcli.BoolFlag{Name: "clear, c", Usage: "clear environment"},
-			gcli.BoolFlag{Name: "x86, x", Usage: "use x86 personality"},
-			gcli.BoolFlag{Name: "regular, r", Usage: "connect as regular user"}},
+		SkipFlagParsing: true,
 		Action: func(c *gcli.Context) error {
-			cli.LxcAttach(c.Args().Get(0), c.Bool("c"), c.Bool("x"), c.Bool("r"))
+			cli.LxcAttach(c.Args().Get(0), c.Args().Tail())
 			return nil
 		}}, {
 
@@ -182,6 +180,16 @@ func main() {
 			gcli.BoolFlag{Name: "parent, p", Usage: "with parent"}},
 		Action: func(c *gcli.Context) error {
 			cli.LxcList(c.Args().Get(0), c.Bool("c"), c.Bool("t"), c.Bool("i"), c.Bool("a"), c.Bool("p"))
+			return nil
+		}}, {
+
+		Name: "log", Usage: "print application logs",
+		Flags: []gcli.Flag{
+			gcli.StringFlag{Name: "start, s", Usage: "start time"},
+			gcli.StringFlag{Name: "end, e", Usage: "end time"},
+			gcli.StringFlag{Name: "level, l", Usage: "log level"}},
+		Action: func(c *gcli.Context) error {
+			cli.Log(c.Args().Get(0), c.String("l"), c.String("s"), c.String("e"))
 			return nil
 		}}, {
 
