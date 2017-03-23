@@ -123,7 +123,7 @@ func cleanupPortMap(ip string) {
 
 	for proto, ports := range list {
 		for _, port := range ports {
-			mapRemove(proto, ip, port)
+			mapRemove(proto, ip, port, "")
 		}
 	}
 }

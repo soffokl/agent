@@ -26,7 +26,7 @@ func MapPort(protocol, internal, external, policy, domain, cert string, remove b
 	}
 
 	if remove {
-		mapRemove(protocol, internal, external)
+		mapRemove(protocol, internal, external, domain)
 	} else if (protocol == "http" || protocol == "https") && len(domain) == 0 {
 		log.Error("\"-d domain\" is mandatory for http protocol")
 	} else if protocol == "https" && (len(cert) == 0 || !gpg.ValidatePem(cert)) {
@@ -40,8 +40,13 @@ func MapPort(protocol, internal, external, policy, domain, cert string, remove b
 		}
 
 		// add containers to backend
-		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+external+".conf",
-			"#Add new host here", "	server "+internal+";", false)
+		if strings.Contains(protocol, "http") {
+			addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+external+"-"+domain+".conf",
+				"#Add new host here", "	server "+internal+";", false)
+		} else {
+			addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+external+".conf",
+				"#Add new host here", "	server "+internal+";", false)
+		}
 
 		// save information to database
 		saveMapToDB(protocol, internal, external, domain)
@@ -55,12 +60,15 @@ func MapPort(protocol, internal, external, policy, domain, cert string, remove b
 	restart()
 }
 
-func mapRemove(protocol, internal, external string) {
+func mapRemove(protocol, internal, external, domain string) {
 	bolt, err := db.New()
 	log.Check(log.ErrorLevel, "Openning portmap database to remove mapping", err)
 	defer bolt.Close()
 	if !bolt.PortInMap(protocol, external, internal) {
 		return
+	}
+	if strings.Contains(protocol, "http") {
+		bolt.RemoveDomain(external, internal, domain)
 	}
 	l := bolt.PortMapDelete(protocol, internal, external)
 
@@ -70,10 +78,19 @@ func mapRemove(protocol, internal, external string) {
 		} else {
 			internal = internal + ":"
 		}
-		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+external+".conf",
-			"server "+internal, " ", true)
+		if strings.Contains(protocol, "http") {
+			addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+external+"-"+domain+".conf",
+				"server "+internal, " ", false)
+		} else {
+			addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+external+".conf",
+				"server "+internal, " ", true)
+		}
 	} else {
-		os.Remove(config.Agent.DataPrefix + "nginx-includes/" + protocol + "/" + external + ".conf")
+		if strings.Contains(protocol, "http") {
+			os.Remove(config.Agent.DataPrefix + "nginx-includes/" + protocol + "/" + external + "-" + domain + ".conf")
+		} else {
+			os.Remove(config.Agent.DataPrefix + "nginx-includes/" + protocol + "/" + external + ".conf")
+		}
 		if protocol == "https" {
 			os.Remove(config.Agent.DataPrefix + "web/ssl/https-" + external + ".key")
 			os.Remove(config.Agent.DataPrefix + "web/ssl/https-" + external + ".crt")
@@ -146,59 +163,57 @@ func newConfig(protocol, port, domain, cert string) {
 		os.MkdirAll(config.Agent.DataPrefix+"nginx-includes/"+protocol, 0755))
 
 	switch protocol {
-	case "https":
-		log.Check(log.ErrorLevel, "Creating certificate dirs", os.MkdirAll(config.Agent.DataPrefix+"/web/ssl/", 0755))
-		fs.Copy(config.Agent.AppPrefix+"etc/nginx/tmpl/vhost-ssl.example",
-			config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf")
-		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
-			"listen      80;", "	listen "+port+";", true)
-		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
-			"listen	443;", "	listen "+port+";", true)
-		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
-			"server_name DOMAIN;", "server_name "+domain+";", true)
-		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
-			"proxy_pass http://DOMAIN-upstream/;", "	proxy_pass http://https-"+port+";", true)
-		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
-			"upstream DOMAIN-upstream {", "upstream https-"+port+" {", true)
+	case "https", "http":
+		if protocol == "https" {
+			fs.Copy(config.Agent.AppPrefix+"etc/nginx/tmpl/vhost-ssl.example",
+				config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+"-"+domain+".conf")
 
-		crt, key := gpg.ParsePem(cert)
-		log.Check(log.WarnLevel, "Writing certificate body", ioutil.WriteFile(config.Agent.DataPrefix+"web/ssl/https-"+port+".crt", crt, 0644))
-		log.Check(log.WarnLevel, "Writing key body", ioutil.WriteFile(config.Agent.DataPrefix+"web/ssl/https-"+port+".key", key, 0644))
+			log.Check(log.ErrorLevel, "Creating certificate dirs", os.MkdirAll(config.Agent.DataPrefix+"/web/ssl/", 0755))
 
-		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
-			"ssl_certificate /var/snap/subutai/current/web/ssl/UNIXDATE.crt;",
-			"ssl_certificate "+config.Agent.DataPrefix+"web/ssl/https-"+port+".crt;", true)
-		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
-			"ssl_certificate_key /var/snap/subutai/current/web/ssl/UNIXDATE.key;",
-			"ssl_certificate_key "+config.Agent.DataPrefix+"web/ssl/https-"+port+".key;", true)
-	case "http":
-		fs.Copy(config.Agent.AppPrefix+"etc/nginx/tmpl/vhost.example",
-			config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+"-"+domain+".conf")
+			addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+"-"+domain+".conf",
+				"listen	443;", "	listen "+port+";", true)
+
+			crt, key := gpg.ParsePem(cert)
+			log.Check(log.WarnLevel, "Writing certificate body", ioutil.WriteFile(config.Agent.DataPrefix+"web/ssl/"+port+"-"+domain+".crt", crt, 0644))
+			log.Check(log.WarnLevel, "Writing key body", ioutil.WriteFile(config.Agent.DataPrefix+"web/ssl/"+port+"-"+domain+".key", key, 0644))
+
+			addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+"-"+domain+".conf",
+				"ssl_certificate /var/snap/subutai/current/web/ssl/UNIXDATE.crt;",
+				"ssl_certificate "+config.Agent.DataPrefix+"web/ssl/https-"+port+".crt;", true)
+			addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+"-"+domain+".conf",
+				"ssl_certificate_key /var/snap/subutai/current/web/ssl/UNIXDATE.key;",
+				"ssl_certificate_key "+config.Agent.DataPrefix+"web/ssl/https-"+port+".key;", true)
+		} else {
+			fs.Copy(config.Agent.AppPrefix+"etc/nginx/tmpl/vhost.example",
+				config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+"-"+domain+".conf")
+		}
 		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+"-"+domain+".conf",
-			"listen 	80;", "	listen "+port+";", true)
+			"listen 80;", "	listen "+port+";", true)
+		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+"-"+domain+".conf",
+			"server localhost:81;", " ", true)
 		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+"-"+domain+".conf",
 			"server_name DOMAIN;", "server_name "+domain+";", true)
 		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+"-"+domain+".conf",
 			"proxy_pass http://DOMAIN-upstream/;", "	proxy_pass http://"+protocol+"-"+port+"-"+domain+";", true)
 		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+"-"+domain+".conf",
 			"upstream DOMAIN-upstream {", "upstream "+protocol+"-"+port+"-"+domain+" {", true)
-	case "tcp":
+	case "tcp", "udp":
 		fs.Copy(config.Agent.AppPrefix+"etc/nginx/tmpl/stream.example",
 			config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf")
+		if protocol == "tcp" {
+			addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
+				"listen PORT;", "	listen "+port+";", true)
+		} else {
+			addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
+				"listen PORT;", "	listen "+port+" udp;", true)
+		}
 		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
-			"listen PORT;", "	listen "+port+";", true)
-	case "udp":
-		fs.Copy(config.Agent.AppPrefix+"etc/nginx/tmpl/stream.example",
-			config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf")
+			"server localhost:81;", " ", true)
 		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
-			"listen PORT;", "	listen "+port+" udp;", true)
+			"upstream PROTO-PORT {", "upstream "+protocol+"-"+port+" {", true)
+		addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
+			"proxy_pass PROTO-PORT;", "	proxy_pass "+protocol+"-"+port+";", true)
 	}
-	addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
-		"server localhost:81;", " ", true)
-	addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
-		"upstream PROTO-PORT {", "upstream "+protocol+"-"+port+" {", true)
-	addLine(config.Agent.DataPrefix+"nginx-includes/"+protocol+"/"+port+".conf",
-		"proxy_pass PROTO-PORT;", "	proxy_pass "+protocol+"-"+port+";", true)
 }
 
 func balanceMethod(protocol, port, policy string) {
@@ -245,15 +260,15 @@ func balanceMethod(protocol, port, policy string) {
 
 func saveMapToDB(protocol, internal, external, domain string) {
 	bolt, err := db.New()
-	ops := make(map[string]string)
+	// ops := make(map[string]string)
 	log.Check(log.ErrorLevel, "Openning database to save portmap", err)
-	c := bolt.ContainerByKey("ip", strings.Split(internal, ":")[0])
-	if len(c) > 0 {
-		ops["container"] = c[0]
-	}
-	if len(domain) > 0 {
-		ops["domain"] = domain
-	}
-	log.Check(log.WarnLevel, "Saving port map to database", bolt.PortMapSet(protocol, internal, external, ops))
+	// c := bolt.ContainerByKey("ip", strings.Split(internal, ":")[0])
+	// if len(c) > 0 {
+	// 	ops["container"] = c[0]
+	// }
+	// if len(domain) > 0 {
+	// 	ops["domain"] = domain
+	// }
+	log.Check(log.WarnLevel, "Saving port map to database", bolt.PortMapSet(protocol, internal, external, domain))
 	log.Check(log.WarnLevel, "Closing database", bolt.Close())
 }

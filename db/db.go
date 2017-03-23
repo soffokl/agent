@@ -240,7 +240,7 @@ func (i *Instance) ContainerByKey(key, value string) (list []string) {
 	return
 }
 
-func (i *Instance) PortMapSet(protocol, internal, external string, ops map[string]string) (err error) {
+func (i *Instance) PortMapSet(protocol, internal, external, domain string) (err error) {
 	i.db.Update(func(tx *bolt.Tx) error {
 		if b := tx.Bucket(portmap); b != nil {
 			b, err = b.CreateBucketIfNotExists([]byte(protocol))
@@ -248,9 +248,12 @@ func (i *Instance) PortMapSet(protocol, internal, external string, ops map[strin
 				b, err = b.CreateBucketIfNotExists([]byte(external))
 				if err == nil {
 					b, err = b.CreateBucketIfNotExists([]byte(internal))
-					for k, v := range ops {
-						b.Put([]byte(k), []byte(v))
+					if strings.Contains(protocol, "http") {
+						b.CreateBucketIfNotExists([]byte(domain))
 					}
+					// for k, v := range ops {
+					// 	b.Put([]byte(k), []byte(v))
+					// }
 				}
 			}
 			return err
@@ -306,6 +309,31 @@ func (i *Instance) ExtPorts(protocol, internal string) (list []string) {
 	})
 	return
 }
+
+func (i *Instance) RemoveDomain(external, internal, domain string) {
+	i.db.Update(func(tx *bolt.Tx) error {
+		if b := tx.Bucket(portmap); b != nil {
+			if b := b.Bucket([]byte("http")); b != nil {
+				if b := b.Bucket([]byte(external)); b != nil {
+					if len(internal) != 0 {
+						if b := b.Bucket([]byte(internal)); b != nil {
+							b.DeleteBucket([]byte(domain))
+						}
+					} else {
+						b.ForEach(func(k, v []byte) error {
+							if c := b.Bucket([]byte(k)); c != nil {
+								c.DeleteBucket([]byte(domain))
+							}
+							return nil
+						})
+					}
+				}
+			}
+		}
+		return nil
+	})
+}
+
 func (i *Instance) PortMapDelete(protocol, internal, external string) (left int) {
 	i.db.Update(func(tx *bolt.Tx) error {
 		if b := tx.Bucket(portmap); b != nil {
@@ -316,10 +344,16 @@ func (i *Instance) PortMapDelete(protocol, internal, external string) (left int)
 						if !strings.Contains(internal, ":") {
 							c := b.Cursor()
 							for k, _ := c.Seek([]byte(internal + ":")); k != nil && bytes.HasPrefix(k, []byte(internal+":")); k, _ = c.Next() {
+								if strings.Contains(protocol, "http") && b.Bucket(k).Stats().BucketN > 1 {
+									return nil
+								}
 								b.DeleteBucket(k)
 								left--
 							}
 						} else if b.Bucket([]byte(internal)) != nil {
+							if strings.Contains(protocol, "http") && b.Bucket([]byte(internal)).Stats().BucketN > 1 {
+								return nil
+							}
 							b.DeleteBucket([]byte(internal))
 							left--
 						}
